@@ -2,7 +2,10 @@
 #define __PIONEERSDKESP32__
 
 typedef struct {
-
+	int port;
+	const char * ip;
 } Pioneer;
 
-#endif __PIONEERSDKESP32__
+void init_pioneer(Pioneer * pio);
+
+#endif // __PIONEERSDKESP32__
