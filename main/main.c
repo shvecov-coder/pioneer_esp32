@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "mavlink/common/mavlink.h"
 #include "pioneer_sdk/pioneer_esp32.h"
 
 #include "lwip/err.h"
@@ -27,10 +28,11 @@
 #define WIFI_CONNECTED_BIT        BIT0
 #define EXAMPLE_ESP_MAXIMUM_RETRY 15
 
+int sock_fd;
 static int s_retry_num = 0;
 static EventGroupHandle_t s_wifi_event_group;
 
-int sock_fd;
+void arm_pioneer();
 void wifi_init_sta(void);
 void send_heartbeats(void * argv);
 static void event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
@@ -155,17 +157,83 @@ void send_heartbeats(void * argv)
 {
 	while (1)
 	{
-		static time_t last_time = 0;
-    	time_t current_time = time(NULL);
-    	if (current_time - last_time >= 1)
-    	{
-        	struct sockaddr_in dest_addr;
-        	dest_addr.sin_family = AF_INET;
-        	dest_addr.sin_port = htons(PIONEER_PORT);
-        	dest_addr.sin_addr.s_addr = inet_addr(PIONEER_IP);
-        	ESP_LOGW(TAG, "Send Heartbeats success..."); // заглушка
-        	last_time = current_time;
-    	}
+        static int arm = 0;
+		struct sockaddr_in dest_addr;
+        dest_addr.sin_family = AF_INET;
+        dest_addr.sin_port = htons(PIONEER_PORT);
+        dest_addr.sin_addr.s_addr = inet_addr(PIONEER_IP);
+
+        mavlink_message_t message;
+        const uint8_t system_id = 49;
+        const uint8_t base_mode = 0;
+        const uint8_t custom_mode = 0;
+
+        mavlink_msg_heartbeat_pack_chan(
+            system_id,
+            0,
+            MAVLINK_COMM_0,
+            &message,
+            MAV_TYPE_GENERIC,
+            0,
+            base_mode,
+            custom_mode,
+            MAV_STATE_STANDBY);
+
+        uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
+        const int len = mavlink_msg_to_send_buffer(buffer, &message);
+
+        int ret = sendto(sock_fd, buffer, len, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+        if (ret != len) 
+        {
+            ESP_LOGE(TAG, "sendto error: %s\n", strerror(errno));
+        }
+        else
+        {
+            ESP_LOGW(TAG, "Sent heartbeat\n");
+        }
+
+        if (arm == 5)
+        {
+            arm_pioneer(&dest_addr, sizeof(dest_addr));
+            arm = 0;
+        }
+
+        arm++;
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
 	}
+
 	vTaskDelete(NULL);
+}
+
+void arm_pioneer(struct sockaddr_in * dst_pioneer, size_t size_dst_pioneer)
+{
+    mavlink_command_long_t command_long_to_send = {
+        .param1 = 1,
+        .param2 = 21196,
+        .param3 = 0,
+        .param4 = 0,
+        .param5 = 0,
+        .param6 = 0,
+        .param7 = 0,
+        .command = MAV_CMD_COMPONENT_ARM_DISARM,
+        .target_system = 0,
+        .target_component = 0,
+        .confirmation = 0
+    };
+
+    mavlink_message_t message_to_send;
+    mavlink_msg_command_long_encode(42, 0, &message_to_send, &command_long_to_send);
+
+    uint8_t buffer[2048] = {0};
+    const int len = mavlink_msg_to_send_buffer(buffer, &message_to_send);
+
+    int ret = sendto(sock_fd, buffer, len, 0, (struct sockaddr *)dst_pioneer, size_dst_pioneer);
+    if (ret != len)
+    {
+        ESP_LOGE(TAG, "sendto() error");
+    }
+    else
+    {
+        ESP_LOGI(TAG, "ARM");
+    }
 }
