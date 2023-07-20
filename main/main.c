@@ -1,9 +1,8 @@
 #include <stdio.h>
+#include <time.h>
 #include <string.h>
 
 #include "esp_log.h"
-#include "lwip/err.h"
-#include "lwip/sys.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "nvs_flash.h"
@@ -12,6 +11,11 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "pioneer_sdk/pioneer_esp32.h"
+
+#include "lwip/err.h"
+#include "lwip/sys.h"
+#include <lwip/netdb.h>
+#include "lwip/sockets.h"
 
 
 #define TAG                       "PIONEER SDK"
@@ -26,7 +30,9 @@
 static int s_retry_num = 0;
 static EventGroupHandle_t s_wifi_event_group;
 
+int sock_fd;
 void wifi_init_sta(void);
+void send_heartbeats(void * argv);
 static void event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
 
 void app_main(void)
@@ -42,7 +48,19 @@ void app_main(void)
 
     ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
     wifi_init_sta();
+
     printf("ip: %s\nport: %d\n", mini.ip, mini.port);
+    sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock_fd < 0)
+    {
+    	ESP_LOGE(TAG, "socket() error");
+    }
+    else
+    {
+    	ESP_LOGI(TAG, "socket() success");
+    }
+
+    xTaskCreate(send_heartbeats, "send_heartbeats", 4096, NULL, 5, NULL);
 }
 
 static void event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
@@ -131,4 +149,23 @@ void wifi_init_sta(void)
     {
         ESP_LOGE(TAG, "UNEXPECTED EVENT");
     }
+}
+
+void send_heartbeats(void * argv)
+{
+	while (1)
+	{
+		static time_t last_time = 0;
+    	time_t current_time = time(NULL);
+    	if (current_time - last_time >= 1)
+    	{
+        	struct sockaddr_in dest_addr;
+        	dest_addr.sin_family = AF_INET;
+        	dest_addr.sin_port = htons(PIONEER_PORT);
+        	dest_addr.sin_addr.s_addr = inet_addr(PIONEER_IP);
+        	ESP_LOGW(TAG, "Send Heartbeats success..."); // заглушка
+        	last_time = current_time;
+    	}
+	}
+	vTaskDelete(NULL);
 }
