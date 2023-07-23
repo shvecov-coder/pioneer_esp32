@@ -3,6 +3,7 @@
 
 typedef struct {
 	int port;
+	int system_id;
 	const char * ip;
 } Pioneer;
 

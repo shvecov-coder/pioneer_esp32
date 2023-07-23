@@ -30,28 +30,43 @@
 
 int sock_fd;
 static int s_retry_num = 0;
+struct sockaddr_in pioneer_addr;
+Pioneer mini = {PIONEER_PORT, 1, PIONEER_IP};
 static EventGroupHandle_t s_wifi_event_group;
 
 void arm_pioneer();
+void disarm_pioneer();
+void takeoff_pioneer();
 void wifi_init_sta(void);
 void send_heartbeats(void * argv);
+void send_mavlink_message(mavlink_message_t * message);
 static void event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
+void send_long_command(uint8_t target_system,
+                       uint8_t target_component,
+                       uint8_t confirmation,
+                       uint16_t command,
+                       float p1,
+                       float p2,
+                       float p3,
+                       float p4,
+                       float p5,
+                       float p6,
+                       float p7);
 
 void app_main(void)
 {
-	Pioneer mini = {PIONEER_PORT, PIONEER_IP};
-
 	esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
       ESP_ERROR_CHECK(nvs_flash_erase());
       ret = nvs_flash_init();
     }
+
     ESP_ERROR_CHECK(ret);
 
     ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
     wifi_init_sta();
 
-    printf("ip: %s\nport: %d\n", mini.ip, mini.port);
     sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock_fd < 0)
     {
@@ -61,6 +76,10 @@ void app_main(void)
     {
     	ESP_LOGI(TAG, "socket() success");
     }
+
+    pioneer_addr.sin_family = AF_INET;
+    pioneer_addr.sin_port = htons(mini.port);
+    pioneer_addr.sin_addr.s_addr = inet_addr(mini.ip);
 
     xTaskCreate(send_heartbeats, "send_heartbeats", 4096, NULL, 5, NULL);
 }
@@ -84,7 +103,7 @@ static void event_handler(void* arg, esp_event_base_t event_base, int32_t event_
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
         }
 
-        ESP_LOGI(TAG,"connect to the AP fail");
+        ESP_LOGW(TAG,"connect to the AP fail");
     }
     else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP)
     {
@@ -133,11 +152,7 @@ void wifi_init_sta(void)
 
     ESP_LOGI(TAG, "wifi_init_sta finished.");
 
-    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
-            WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-            pdFALSE,
-            pdFALSE,
-            portMAX_DELAY);
+    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
     if (bits & WIFI_CONNECTED_BIT)
     {
@@ -158,12 +173,7 @@ void send_heartbeats(void * argv)
 	while (1)
 	{
         static int arm = 0;
-		struct sockaddr_in dest_addr;
-        dest_addr.sin_family = AF_INET;
-        dest_addr.sin_port = htons(PIONEER_PORT);
-        dest_addr.sin_addr.s_addr = inet_addr(PIONEER_IP);
-
-        mavlink_message_t message;
+		mavlink_message_t message;
         const uint8_t system_id = 49;
         const uint8_t base_mode = 0;
         const uint8_t custom_mode = 0;
@@ -179,24 +189,16 @@ void send_heartbeats(void * argv)
             custom_mode,
             MAV_STATE_STANDBY);
 
-        uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
-        const int len = mavlink_msg_to_send_buffer(buffer, &message);
+        send_mavlink_message(&message);
 
-        int ret = sendto(sock_fd, buffer, len, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-        if (ret != len) 
-        {
-            ESP_LOGE(TAG, "sendto error: %s\n", strerror(errno));
-        }
-        else
-        {
-            ESP_LOGW(TAG, "Sent heartbeat\n");
-        }
-
-        if (arm == 5)
-        {
-            arm_pioneer(&dest_addr, sizeof(dest_addr));
-            arm = 0;
-        }
+        // if (arm == 10)
+        // {
+        //     arm_pioneer(&mini);
+        // }
+        // if (arm == 20)
+        // {
+        //     disarm_pioneer(&mini);
+        // }
 
         arm++;
         vTaskDelay(1000 / portTICK_PERIOD_MS);
@@ -205,35 +207,67 @@ void send_heartbeats(void * argv)
 	vTaskDelete(NULL);
 }
 
-void arm_pioneer(struct sockaddr_in * dst_pioneer, size_t size_dst_pioneer)
+void send_long_command(uint8_t target_system,
+                       uint8_t target_component,
+                       uint8_t confirmation,
+                       uint16_t command,
+                       float p1,
+                       float p2,
+                       float p3,
+                       float p4,
+                       float p5,
+                       float p6,
+                       float p7)
 {
     mavlink_command_long_t command_long_to_send = {
-        .param1 = 1,
-        .param2 = 21196,
-        .param3 = 0,
-        .param4 = 0,
-        .param5 = 0,
-        .param6 = 0,
-        .param7 = 0,
-        .command = MAV_CMD_COMPONENT_ARM_DISARM,
-        .target_system = 0,
-        .target_component = 0,
-        .confirmation = 0
+        .param1 = p1,
+        .param2 = p2,
+        .param3 = p3,
+        .param4 = p4,
+        .param5 = p5,
+        .param6 = p6,
+        .param7 = p7,
+        .command = command,
+        .target_system = target_system,
+        .target_component = target_component,
+        .confirmation = confirmation
     };
 
     mavlink_message_t message_to_send;
     mavlink_msg_command_long_encode(42, 0, &message_to_send, &command_long_to_send);
+    send_mavlink_message(&message_to_send);
+}
 
-    uint8_t buffer[2048] = {0};
-    const int len = mavlink_msg_to_send_buffer(buffer, &message_to_send);
+void send_mavlink_message(mavlink_message_t * message)
+{
+    uint8_t buffer[2048];
+    memset(buffer, 0, sizeof(buffer));
 
-    int ret = sendto(sock_fd, buffer, len, 0, (struct sockaddr *)dst_pioneer, size_dst_pioneer);
+    const int len = mavlink_msg_to_send_buffer(buffer, message);
+    int ret = sendto(sock_fd, buffer, len, 0, (struct sockaddr *)&pioneer_addr, sizeof(pioneer_addr));
     if (ret != len)
     {
-        ESP_LOGE(TAG, "sendto() error");
+        ESP_LOGW(TAG, "send_mavlink_message() error");
     }
     else
     {
-        ESP_LOGI(TAG, "ARM");
+        ESP_LOGI(TAG, "send_mavlink_message() success");
     }
+}
+
+void arm_pioneer()
+{
+    send_long_command(mini.system_id, 0, 0, MAV_CMD_COMPONENT_ARM_DISARM, 1, 0, 0, 0, 0, 0, 0);
+    ESP_LOGW(TAG, "arm()");
+}
+
+void disarm_pioneer()
+{
+    send_long_command(mini.system_id, 0, 0, MAV_CMD_COMPONENT_ARM_DISARM, 0, 0, 0, 0, 0, 0, 0);
+    ESP_LOGW(TAG, "disarm()");
+}
+
+void takeoff_pioneer()
+{
+
 }
