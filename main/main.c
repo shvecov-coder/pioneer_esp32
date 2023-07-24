@@ -35,6 +35,7 @@ Pioneer mini = {PIONEER_PORT, 1, PIONEER_IP};
 static EventGroupHandle_t s_wifi_event_group;
 
 void arm_pioneer();
+void land_pioneer();
 void disarm_pioneer();
 void takeoff_pioneer();
 void wifi_init_sta(void);
@@ -81,7 +82,7 @@ void app_main(void)
     pioneer_addr.sin_port = htons(mini.port);
     pioneer_addr.sin_addr.s_addr = inet_addr(mini.ip);
 
-    xTaskCreate(send_heartbeats, "send_heartbeats", 4096, NULL, 5, NULL);
+    xTaskCreate(send_heartbeats, "send_heartbeats", 65536, NULL, 5, NULL);
 }
 
 static void event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
@@ -174,7 +175,7 @@ void send_heartbeats(void * argv)
 	{
         static int arm = 0;
 		mavlink_message_t message;
-        const uint8_t system_id = 49;
+        const uint8_t system_id = 1;
         const uint8_t base_mode = 0;
         const uint8_t custom_mode = 0;
 
@@ -191,14 +192,22 @@ void send_heartbeats(void * argv)
 
         send_mavlink_message(&message);
 
-        // if (arm == 10)
-        // {
-        //     arm_pioneer(&mini);
-        // }
-        // if (arm == 20)
-        // {
-        //     disarm_pioneer(&mini);
-        // }
+        if (arm == 5)
+        {
+            arm_pioneer(&mini);
+        }
+        if (arm == 10)
+        {
+            takeoff_pioneer();
+        }
+        if (arm == 20)
+        {
+            land_pioneer(&mini);
+        }
+        if (arm == 30)
+        {
+            disarm_pioneer();
+        }
 
         arm++;
         vTaskDelay(1000 / portTICK_PERIOD_MS);
@@ -234,7 +243,7 @@ void send_long_command(uint8_t target_system,
     };
 
     mavlink_message_t message_to_send;
-    mavlink_msg_command_long_encode(42, 0, &message_to_send, &command_long_to_send);
+    mavlink_msg_command_long_encode(1, 0, &message_to_send, &command_long_to_send);
     send_mavlink_message(&message_to_send);
 }
 
@@ -251,13 +260,13 @@ void send_mavlink_message(mavlink_message_t * message)
     }
     else
     {
-        ESP_LOGI(TAG, "send_mavlink_message() success");
+        ESP_LOGI(TAG, "send_mavlink_message() success ret = %d", ret);
     }
 }
 
 void arm_pioneer()
 {
-    send_long_command(mini.system_id, 0, 0, MAV_CMD_COMPONENT_ARM_DISARM, 1, 0, 0, 0, 0, 0, 0);
+    send_long_command(mini.system_id, 0, 0, MAV_CMD_COMPONENT_ARM_DISARM, 1, 21196, 0, 0, 0, 0, 0);
     ESP_LOGW(TAG, "arm()");
 }
 
@@ -269,5 +278,12 @@ void disarm_pioneer()
 
 void takeoff_pioneer()
 {
+    send_long_command(mini.system_id, 0, 0, MAV_CMD_NAV_TAKEOFF_LOCAL, 0, 0, 0.5, 0, 0, 0, 0);
+    ESP_LOGW(TAG, "takeoff_pioneer()");
+}
 
+void land_pioneer()
+{
+    send_long_command(mini.system_id, 0, 0, MAV_CMD_NAV_LAND_LOCAL, 0, 0, 0, 0, 0, 0, 0);
+    ESP_LOGW(TAG, "land_pioneer()");
 }
