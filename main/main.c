@@ -278,12 +278,12 @@ void disarm_pioneer()
 
 void takeoff_pioneer()
 {
-    send_long_command(mini.system_id, 0, 0, MAV_CMD_NAV_TAKEOFF_LOCAL, 0, 0, 0.5, 0, 0, 0, 0);
+    send_long_command(mini.system_id, 0, 0, MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, 0);
     ESP_LOGW(TAG, "takeoff_pioneer()");
 }
 
 void land_pioneer()
 {
-    send_long_command(mini.system_id, 0, 0, MAV_CMD_NAV_LAND_LOCAL, 0, 0, 0, 0, 0, 0, 0);
+    send_long_command(mini.system_id, 0, 0, MAV_CMD_NAV_LAND, 0, 0, 0, 0, 0, 0, 0);
     ESP_LOGW(TAG, "land_pioneer()");
 }
